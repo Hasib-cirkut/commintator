@@ -1,7 +1,5 @@
 use std::error::Error;
-use std::path::Path;
 use std::process::Command;
-use tauri::Runtime;
 use tokio::process::Command as AsyncCommand;
 
 #[tauri::command]
@@ -9,9 +7,7 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-fn get_paths() -> (bool, String) {
-    let path = Path::new("/Users/adibhasib/development/adibhasib.dev");
-
+fn get_paths(path: &String) -> (bool, String) {
     let output = Command::new("git")
         .current_dir(path)
         .arg("diff")
@@ -32,9 +28,7 @@ fn get_paths() -> (bool, String) {
     }
 }
 
-fn get_file_diff(path: String) -> (bool, String) {
-    let path = Path::new("/Users/adibhasib/development/adibhasib.dev");
-
+fn get_file_diff(path: &String) -> (bool, String) {
     let output = match Command::new("git")
         .current_dir(path)
         .arg("diff")
@@ -58,25 +52,37 @@ fn get_file_diff(path: String) -> (bool, String) {
     }
 }
 
-
-
 #[tauri::command]
-async fn get_commit_suggestion() -> Result<String, String> {
-    match generate_commit_suggestion().await {
+async fn get_commit_suggestion(path: String) -> Result<String, String> {
+
+    let is_git_repo =  Command::new("git")
+        .current_dir(&path)
+        .arg("rev-parse")
+        .arg("--git-dir")
+        .output().expect("Error while checking if dir is git repo");
+    
+    println!("{}", String::from_utf8(is_git_repo.stdout).unwrap());
+    
+    if !is_git_repo.status.success() {
+        return Ok("Not a git repo".to_string());
+    }
+    
+    println!("Found a git repo");
+    
+    match generate_commit_suggestion(&path).await {
         Ok(commit_suggestion) => Ok(commit_suggestion),
         Err(e) => Err(e.to_string()),
     }
 }
 
-async fn generate_commit_suggestion() -> Result<String, Box<dyn Error>> {
-
-    let (path_err, paths_str) = get_paths();
+async fn generate_commit_suggestion(path: &String) -> Result<String, Box<dyn Error>> {
+    let (path_err, paths_str) = get_paths(path);
 
     if path_err {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "Path error occurred"
-        )));    
+            "Path error occurred",
+        )));
     }
 
     let collection: Vec<&str> = paths_str.lines().collect();
@@ -84,12 +90,12 @@ async fn generate_commit_suggestion() -> Result<String, Box<dyn Error>> {
     let mut result = String::new();
 
     for item in collection.iter() {
-        let (is_error, value) = get_file_diff(item.to_string());
+        let (is_error, value) = get_file_diff(&item.to_string());
 
         if is_error {
-            break
+            break;
         }
-        
+
         result.push_str(item);
         result.push_str(&format!("\n{}\n", item));
     }
@@ -106,28 +112,24 @@ and aim for clarity in a single line per commit. Return the results formatted in
     let output = AsyncCommand::new("ollama")
         .arg("run")
         .arg("llama2")
-        .arg(prompt).output().await?;
-    
-    
+        .arg(prompt)
+        .output()
+        .await?;
+
     if !output.status.success() {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "Path error occurred"
-        )));    
+            "Path error occurred",
+        )));
     }
-    
-    Ok(
-        String::from_utf8(output.stdout).expect("Error")
-    )
 
+    Ok(String::from_utf8(output.stdout).expect("Error"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-
-
-    get_paths();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![greet, get_commit_suggestion])
         .run(tauri::generate_context!())

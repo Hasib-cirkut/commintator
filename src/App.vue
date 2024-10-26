@@ -1,21 +1,43 @@
+<template>
+  <main class="container">
+    <p v-if="isLoading">Loading...</p>
+    <button @click="onSelectDirectory">Select Directory</button>
+    <button :disabled="isButtonDisabled" @click="onGetPaths">Get Commit Message Suggestion</button>
+
+    <p>Selected path: {{ selectedPath }}</p>
+    <p v-if="showNotGitRepoMessage">Not a git repo</p>
+
+    <div class="row">
+      <div v-html="suggestion" />
+    </div>
+  </main>
+</template>
+
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog"
+import { Command } from "@tauri-apps/plugin-shell";
 
-const greetMsg = ref("");
-const name = ref("");
 const suggestion = ref("")
-const isLoading = ref("")
+const isLoading = ref(false)
+const selectedPath = ref("")
+const isSelectedPathGitRepo = ref(false)
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
-}
+const isButtonDisabled = computed(() => {
+  return selectedPath.value === "" || isSelectedPathGitRepo.value === false;
+})
+
+const showNotGitRepoMessage = computed(() => {
+  return selectedPath.value !== "" && isSelectedPathGitRepo.value === false;
+})
 
 async function onGetPaths(){
   isLoading.value = true;
   try {
-    const output: string = await invoke("get_commit_suggestion")
+    const output: string = await invoke("get_commit_suggestion", {
+      path: selectedPath.value,
+    })
     suggestion.value = output
   }catch (e) {
     throw new Error(e)
@@ -23,18 +45,36 @@ async function onGetPaths(){
     isLoading.value = false;
   }
 }
+
+async function onSelectDirectory() {
+  const selected = await open({
+    multiple: false,
+    directory: true,
+    title: 'Select an repo.'
+  })
+
+  if(selected){
+    selectedPath.value = selected
+  }
+
+  await isGitRepo()
+}
+
+async function isGitRepo(){
+  const isRepo = await Command.create("exec-git", ['rev-parse', '--git-dir'], {
+    cwd: selectedPath.value
+  }).execute()
+
+  if(isRepo.code === 128 && isRepo.stdout === ""){
+    isSelectedPathGitRepo.value = false
+    
+    return
+  }
+
+  isSelectedPathGitRepo.value = true
+}
 </script>
 
-<template>
-  <main class="container">
-    <p v-if="isLoading">Loading...</p>
-    <button @click="onGetPaths">Get Commit Message Suggestion</button>
-
-    <div class="row">
-      <div v-html="suggestion" />
-    </div>
-  </main>
-</template>
 
 <style scoped>
 .logo.vite:hover {
@@ -126,6 +166,10 @@ button:hover {
 button:active {
   border-color: #396cd8;
   background-color: #e8e8e8;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 input,
